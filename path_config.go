@@ -5,6 +5,7 @@ package snowflakepat
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
@@ -12,11 +13,14 @@ import (
 
 // backendConfig holds the Snowflake admin connection details.
 type backendConfig struct {
-	Account    string `json:"account"`
-	Username   string `json:"username"`
-	PrivateKey []byte `json:"private_key"`
-	Database   string `json:"database"`
+	Account             string `json:"account"`
+	Username            string `json:"username"`
+	PrivateKey          []byte `json:"private_key"`
+	Database            string `json:"database"`
+	DisplayNamePrefix   string `json:"display_name_prefix"`
 }
+
+const defaultDisplayNamePrefix = "oidc-"
 
 func pathConfig(b *backend) *framework.Path {
 	return &framework.Path{
@@ -48,6 +52,11 @@ func pathConfig(b *backend) *framework.Path {
 			"database": {
 				Type:        framework.TypeString,
 				Description: "Optional default Snowflake database for the admin connection.",
+			},
+			"display_name_prefix": {
+				Type:        framework.TypeString,
+				Description: fmt.Sprintf("Prefix to strip from the Vault token display name to derive the Snowflake username in per-user roles. Defaults to %q, which is correct for the default OIDC auth mount.", defaultDisplayNamePrefix),
+				Default:     defaultDisplayNamePrefix,
 			},
 		},
 
@@ -85,11 +94,16 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 		return logical.ErrorResponse("not configured"), nil
 	}
 
+	prefix := cfg.DisplayNamePrefix
+	if prefix == "" {
+		prefix = defaultDisplayNamePrefix
+	}
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"account":  cfg.Account,
-			"username": cfg.Username,
-			"database": cfg.Database,
+			"account":              cfg.Account,
+			"username":             cfg.Username,
+			"database":             cfg.Database,
+			"display_name_prefix":  prefix,
 			// private_key intentionally omitted
 		},
 	}, nil
@@ -115,6 +129,9 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 	}
 	if v, ok := data.GetOk("database"); ok {
 		cfg.Database = v.(string)
+	}
+	if v, ok := data.GetOk("display_name_prefix"); ok {
+		cfg.DisplayNamePrefix = v.(string)
 	}
 
 	if cfg.Account == "" {

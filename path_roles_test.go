@@ -80,22 +80,23 @@ func TestRoles_WriteReadDelete(t *testing.T) {
 }
 
 func TestRoles_MissingSnowflakeUser(t *testing.T) {
+	// snowflake_user is now optional — omitting it means per-user mode where
+	// the Snowflake username is derived from the caller's Vault identity.
 	b, storage := newTestBackend(t)
 	ctx := context.Background()
 
 	req := &logical.Request{
 		Operation: logical.CreateOperation,
-		Path:      "roles/bad-role",
+		Path:      "roles/per-user-role",
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"days_to_expiry": 1,
-			// snowflake_user missing
+			// snowflake_user intentionally omitted — per-user mode
 		},
 	}
 	resp, err := b.HandleRequest(ctx, req)
 	require.NoError(t, err)
-	require.True(t, resp.IsError())
-	require.Contains(t, resp.Error().Error(), "snowflake_user")
+	require.Nil(t, resp) // should succeed
 }
 
 func TestRoles_InvalidDaysToExpiry(t *testing.T) {

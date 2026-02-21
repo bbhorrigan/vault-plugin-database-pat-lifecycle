@@ -39,8 +39,7 @@ func pathRoles(b *backend) []*framework.Path {
 				},
 				"snowflake_user": {
 					Type:        framework.TypeString,
-					Description: "Snowflake user for whom the PAT will be created.",
-					Required:    true,
+					Description: "Snowflake user for whom the PAT will be created. If omitted, the PAT is created for the requesting user derived from their Vault identity (per-user mode). If set, all users of this role share one Snowflake account (shared mode) — note Snowflake enforces a limit of 15 PATs per user.",
 				},
 				"role_restriction": {
 					Type:        framework.TypeString,
@@ -153,9 +152,6 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, data 
 		role.DaysToExpiry = v.(int)
 	}
 
-	if role.SnowflakeUser == "" {
-		return logical.ErrorResponse("snowflake_user is required"), nil
-	}
 	if role.DaysToExpiry < 1 || role.DaysToExpiry > 365 {
 		return logical.ErrorResponse("days_to_expiry must be between 1 and 365"), nil
 	}

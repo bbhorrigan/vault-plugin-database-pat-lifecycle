@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/vault/sdk/framework"
@@ -60,6 +61,33 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, data 
 		return logical.ErrorResponse("plugin is not configured"), nil
 	}
 
+	// Determine the target Snowflake user.
+	//
+	// Shared mode: snowflake_user is set on the role — all callers create PATs
+	// for that one account. Snowflake enforces a 15-PAT limit per user.
+	//
+	// Per-user mode: snowflake_user is empty — each caller creates a PAT for
+	// their own Snowflake account, derived from their Vault token display name
+	// by stripping the configured prefix (default "oidc-").
+	snowflakeUser := role.SnowflakeUser
+	shared := snowflakeUser != ""
+
+	if !shared {
+		prefix := cfg.DisplayNamePrefix
+		if prefix == "" {
+			prefix = defaultDisplayNamePrefix
+		}
+		snowflakeUser = strings.TrimPrefix(req.DisplayName, prefix)
+		if snowflakeUser == "" {
+			return logical.ErrorResponse(
+				"could not determine Snowflake username from Vault token display name %q — "+
+					"set snowflake_user on the role for shared mode, or ensure display_name_prefix "+
+					"is configured correctly for per-user mode",
+				req.DisplayName,
+			), nil
+		}
+	}
+
 	client, err := newSnowflakeClient(cfg.Account, cfg.Username, cfg.PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Snowflake: %w", err)
@@ -68,7 +96,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, data 
 
 	tokenName := generateTokenName(roleName)
 
-	tokenSecret, err := client.CreatePAT(ctx, role.SnowflakeUser, tokenName, role.RoleRestriction, role.DaysToExpiry)
+	tokenSecret, err := client.CreatePAT(ctx, snowflakeUser, tokenName, role.RoleRestriction, role.DaysToExpiry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create PAT: %w", err)
 	}
@@ -80,18 +108,27 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, data 
 		map[string]interface{}{
 			"token_name":     tokenName,
 			"token_secret":   tokenSecret,
-			"snowflake_user": role.SnowflakeUser,
+			"snowflake_user": snowflakeUser,
 			"account":        cfg.Account,
 		},
 		map[string]interface{}{
 			"token_name":     tokenName,
-			"snowflake_user": role.SnowflakeUser,
+			"snowflake_user": snowflakeUser,
 			"role_name":      roleName,
 		},
 	)
 
 	resp.Secret.TTL = ttl
 	resp.Secret.MaxTTL = maxTTL
+
+	if shared {
+		resp.AddWarning(
+			"This role uses a shared Snowflake account. Snowflake enforces a limit of 15 PATs " +
+				"per user. If the limit is reached, new credential requests will fail until " +
+				"existing leases expire or are revoked. Consider using per-user mode (omit " +
+				"snowflake_user from the role) if each developer has their own Snowflake account.",
+		)
+	}
 
 	return resp, nil
 }
