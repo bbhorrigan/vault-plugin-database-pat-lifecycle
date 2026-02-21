@@ -12,6 +12,7 @@ Snowflake is deprecating password authentication. Cortex Code and the Snowflake
 REST APIs use PATs as Bearer tokens. This plugin provides a Vault-native way to
 issue short-lived, automatically-revoked PATs using the same workflow as other
 Vault dynamic secrets.
+<img width="1000" height="700" alt="image" src="https://github.com/user-attachments/assets/9f2d2d0f-8107-4613-b137-4bdb4224f6c7" />
 
 ## Authentication
 
