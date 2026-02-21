@@ -106,6 +106,13 @@ automatically removed from Snowflake.
 | `private_key` | Yes | PEM-encoded PKCS8 RSA private key for key-pair auth |
 | `database` | No | Default database for the admin connection |
 
+## Developer Authentication
+
+For teams using Okta, developers can authenticate to Vault with their existing
+Okta credentials and pull short-lived PATs without any manual Snowflake setup.
+
+See [docs/okta-oidc.md](docs/okta-oidc.md) for a full setup guide.
+
 ## License
 
 MPL-2.0
