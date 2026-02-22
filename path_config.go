@@ -5,7 +5,6 @@ package snowflakepat
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
@@ -13,14 +12,12 @@ import (
 
 // backendConfig holds the Snowflake admin connection details.
 type backendConfig struct {
-	Account             string `json:"account"`
-	Username            string `json:"username"`
-	PrivateKey          []byte `json:"private_key"`
-	Database            string `json:"database"`
-	DisplayNamePrefix   string `json:"display_name_prefix"`
+	Account           string `json:"account"`
+	Username          string `json:"username"`
+	PrivateKey        []byte `json:"private_key"`
+	Database          string `json:"database"`
+	AuthMountAccessor string `json:"auth_mount_accessor"`
 }
-
-const defaultDisplayNamePrefix = "oidc-"
 
 func pathConfig(b *backend) *framework.Path {
 	return &framework.Path{
@@ -53,10 +50,9 @@ func pathConfig(b *backend) *framework.Path {
 				Type:        framework.TypeString,
 				Description: "Optional default Snowflake database for the admin connection.",
 			},
-			"display_name_prefix": {
+			"auth_mount_accessor": {
 				Type:        framework.TypeString,
-				Description: fmt.Sprintf("Prefix to strip from the Vault token display name to derive the Snowflake username in per-user roles. Defaults to %q, which is correct for the default OIDC auth mount.", defaultDisplayNamePrefix),
-				Default:     defaultDisplayNamePrefix,
+				Description: "Vault auth mount accessor used to identify the correct identity alias in per-user mode (e.g. auth_oidc_abc123). If unset, the plugin picks the first OIDC or JWT alias on the entity. Run `vault auth list -detailed` to find the accessor.",
 			},
 		},
 
@@ -94,16 +90,12 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 		return logical.ErrorResponse("not configured"), nil
 	}
 
-	prefix := cfg.DisplayNamePrefix
-	if prefix == "" {
-		prefix = defaultDisplayNamePrefix
-	}
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"account":              cfg.Account,
-			"username":             cfg.Username,
-			"database":             cfg.Database,
-			"display_name_prefix":  prefix,
+			"account":             cfg.Account,
+			"username":            cfg.Username,
+			"database":            cfg.Database,
+			"auth_mount_accessor": cfg.AuthMountAccessor,
 			// private_key intentionally omitted
 		},
 	}, nil
@@ -130,8 +122,8 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 	if v, ok := data.GetOk("database"); ok {
 		cfg.Database = v.(string)
 	}
-	if v, ok := data.GetOk("display_name_prefix"); ok {
-		cfg.DisplayNamePrefix = v.(string)
+	if v, ok := data.GetOk("auth_mount_accessor"); ok {
+		cfg.AuthMountAccessor = v.(string)
 	}
 
 	if cfg.Account == "" {

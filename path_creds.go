@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/vault/sdk/framework"
@@ -66,25 +65,30 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, data 
 	// Shared mode: snowflake_user is set on the role — all callers create PATs
 	// for that one account. Snowflake enforces a 15-PAT limit per user.
 	//
-	// Per-user mode: snowflake_user is empty — each caller creates a PAT for
-	// their own Snowflake account, derived from their Vault token display name
-	// by stripping the configured prefix (default "oidc-").
+	// Per-user mode: snowflake_user is empty — each caller gets a PAT for their
+	// own Snowflake account, derived from their Vault entity alias name (the
+	// value of user_claim from OIDC, typically their email address).
 	snowflakeUser := role.SnowflakeUser
 	shared := snowflakeUser != ""
 
 	if !shared {
-		prefix := cfg.DisplayNamePrefix
-		if prefix == "" {
-			prefix = defaultDisplayNamePrefix
-		}
-		snowflakeUser = strings.TrimPrefix(req.DisplayName, prefix)
-		if snowflakeUser == "" {
+		if req.EntityID == "" {
 			return logical.ErrorResponse(
-				"could not determine Snowflake username from Vault token display name %q — "+
-					"set snowflake_user on the role for shared mode, or ensure display_name_prefix "+
-					"is configured correctly for per-user mode",
-				req.DisplayName,
+				"per-user mode requires the caller to have a Vault entity — " +
+					"log in via OIDC or another identity-aware auth method, " +
+					"or set snowflake_user on the role to use shared mode",
 			), nil
+		}
+		entity, err := b.System().EntityInfo(req.EntityID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to look up Vault entity: %w", err)
+		}
+		if entity == nil {
+			return logical.ErrorResponse("no Vault entity found for entity ID %q", req.EntityID), nil
+		}
+		snowflakeUser, err = snowflakeUsernameFromEntity(entity, cfg.AuthMountAccessor)
+		if err != nil {
+			return logical.ErrorResponse("%s", err.Error()), nil
 		}
 	}
 
@@ -131,6 +135,40 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, data 
 	}
 
 	return resp, nil
+}
+
+// snowflakeUsernameFromEntity extracts the Snowflake username from a Vault
+// entity by looking at its identity aliases. The alias name is the value of
+// the user_claim from OIDC (typically the user's email address).
+//
+// If mountAccessor is set, only the alias from that specific auth mount is
+// considered. Otherwise the first OIDC or JWT alias is used.
+func snowflakeUsernameFromEntity(entity *logical.Entity, mountAccessor string) (string, error) {
+	if mountAccessor != "" {
+		for _, alias := range entity.Aliases {
+			if alias.MountAccessor == mountAccessor {
+				return alias.Name, nil
+			}
+		}
+		return "", fmt.Errorf(
+			"no identity alias found for auth mount accessor %q — "+
+				"run `vault auth list -detailed` to verify the accessor and update auth_mount_accessor in the plugin config",
+			mountAccessor,
+		)
+	}
+
+	// No accessor configured — use the first OIDC or JWT alias.
+	for _, alias := range entity.Aliases {
+		if alias.MountType == "oidc" || alias.MountType == "jwt" {
+			return alias.Name, nil
+		}
+	}
+
+	return "", fmt.Errorf(
+		"no OIDC or JWT identity alias found on Vault entity — " +
+			"log in via an OIDC auth method, or set auth_mount_accessor in the plugin config, " +
+			"or set snowflake_user on the role to use shared mode",
+	)
 }
 
 // generateTokenName creates a unique PAT name safe for Snowflake identifiers.
