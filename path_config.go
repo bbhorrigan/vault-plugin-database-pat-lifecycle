@@ -12,11 +12,13 @@ import (
 
 // backendConfig holds the Snowflake admin connection details.
 type backendConfig struct {
-	Account           string `json:"account"`
-	Username          string `json:"username"`
-	PrivateKey        []byte `json:"private_key"`
-	Database          string `json:"database"`
-	AuthMountAccessor string `json:"auth_mount_accessor"`
+	Account              string `json:"account"`
+	Username             string `json:"username"`
+	PrivateKey           []byte `json:"private_key"`
+	Database             string `json:"database"`
+	AuthMountAccessor    string `json:"auth_mount_accessor"`
+	WIFProvider          string `json:"wif_provider"`       // aws, gcp, azure, oidc
+	WIFEntraResource     string `json:"wif_entra_resource"` // Azure only
 }
 
 func pathConfig(b *backend) *framework.Path {
@@ -53,6 +55,14 @@ func pathConfig(b *backend) *framework.Path {
 			"auth_mount_accessor": {
 				Type:        framework.TypeString,
 				Description: "Vault auth mount accessor used to identify the correct identity alias in per-user mode (e.g. auth_oidc_abc123). If unset, the plugin picks the first OIDC or JWT alias on the entity. Run `vault auth list -detailed` to find the accessor.",
+			},
+			"wif_provider": {
+				Type:        framework.TypeString,
+				Description: "Cloud provider for Workload Identity Federation authentication (aws, gcp, azure, oidc). When set, private_key is not required — Vault authenticates to Snowflake using its cloud-native identity (e.g. IAM role, Managed Identity, service account). Requires Snowflake WIF trust policy configured for the Vault host identity.",
+			},
+			"wif_entra_resource": {
+				Type:        framework.TypeString,
+				Description: "Azure Entra ID resource URI for WIF authentication (Azure only, e.g. api://my-app-id). Required only when wif_provider=azure.",
 			},
 		},
 
@@ -92,10 +102,12 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"account":             cfg.Account,
-			"username":            cfg.Username,
-			"database":            cfg.Database,
-			"auth_mount_accessor": cfg.AuthMountAccessor,
+			"account":              cfg.Account,
+			"username":             cfg.Username,
+			"database":             cfg.Database,
+			"auth_mount_accessor":  cfg.AuthMountAccessor,
+			"wif_provider":         cfg.WIFProvider,
+			"wif_entra_resource":   cfg.WIFEntraResource,
 			// private_key intentionally omitted
 		},
 	}, nil
@@ -125,6 +137,12 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 	if v, ok := data.GetOk("auth_mount_accessor"); ok {
 		cfg.AuthMountAccessor = v.(string)
 	}
+	if v, ok := data.GetOk("wif_provider"); ok {
+		cfg.WIFProvider = v.(string)
+	}
+	if v, ok := data.GetOk("wif_entra_resource"); ok {
+		cfg.WIFEntraResource = v.(string)
+	}
 
 	if cfg.Account == "" {
 		return logical.ErrorResponse("account is required"), nil
@@ -132,8 +150,11 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 	if cfg.Username == "" {
 		return logical.ErrorResponse("username is required"), nil
 	}
-	if len(cfg.PrivateKey) == 0 {
-		return logical.ErrorResponse("private_key is required"), nil
+	if len(cfg.PrivateKey) == 0 && cfg.WIFProvider == "" {
+		return logical.ErrorResponse("either private_key or wif_provider is required"), nil
+	}
+	if len(cfg.PrivateKey) > 0 && cfg.WIFProvider != "" {
+		return logical.ErrorResponse("private_key and wif_provider are mutually exclusive — use one or the other"), nil
 	}
 
 	entry, err := logical.StorageEntryJSON(configStoragePath, cfg)

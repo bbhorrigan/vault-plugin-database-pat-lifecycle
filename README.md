@@ -220,9 +220,82 @@ automatically removed from Snowflake.
 |-----------|----------|---------|-------------|
 | `account` | Yes | — | Snowflake account identifier (e.g. `myorg-myaccount`) |
 | `username` | Yes | — | Admin user with privilege to create PATs for other users |
-| `private_key` | Yes | — | PEM-encoded PKCS8 RSA private key for key-pair auth |
+| `private_key` | See note | — | PEM-encoded PKCS8 RSA private key for key-pair auth. Required unless `wif_provider` is set. |
 | `database` | No | — | Default database for the admin connection |
 | `auth_mount_accessor` | No | — | Accessor of the Vault auth mount to use when looking up identity aliases in per-user mode (e.g. `auth_oidc_abc12345`). If unset, the plugin picks the first OIDC or JWT alias on the entity. Run `vault auth list -detailed` to find the value. |
+| `wif_provider` | See note | — | Cloud provider for Workload Identity Federation auth: `aws`, `gcp`, `azure`, or `oidc`. When set, `private_key` is not required. |
+| `wif_entra_resource` | No | — | Azure Entra ID resource URI (Azure WIF only, e.g. `api://my-app-id`). |
+
+> **Note:** Exactly one of `private_key` (key-pair auth) or `wif_provider` (WIF auth) must be set.
+
+---
+
+## Workload Identity Federation (WIF)
+
+WIF lets the plugin authenticate to Snowflake using the cloud provider identity
+of the host running Vault — no private key needs to be stored in Vault.
+
+This is ideal when:
+- Vault runs on a cloud VM (EC2, Azure VM, GCE) with an attached IAM role or
+  Managed Identity
+- Vault runs in Kubernetes with a service account projected token
+- You want to eliminate long-lived key material from your Vault configuration
+
+**How it works:** Instead of a private key, Vault fetches a short-lived
+attestation token from the cloud provider's metadata service (IMDS) and presents
+it to Snowflake. Snowflake verifies the token against the trust policy you
+configure for the identity.
+
+### Prerequisites in Snowflake
+
+You must configure a trust policy in Snowflake for the identity Vault will use.
+See the [Snowflake WIF documentation](https://docs.snowflake.com/en/user-guide/authentication/workload-identity-federation) for full details.
+
+### AWS (EC2 IAM Role / EKS Service Account)
+
+```bash
+# Configure with AWS WIF — no private_key needed
+vault write snowflake-pat/config \
+  account="myorg-myaccount" \
+  username="vault_admin" \
+  wif_provider="aws"
+```
+
+In Snowflake, create a trust policy for the IAM role ARN attached to your Vault EC2 instance or EKS pod.
+
+### GCP (Service Account / Workload Identity)
+
+```bash
+vault write snowflake-pat/config \
+  account="myorg-myaccount" \
+  username="vault_admin" \
+  wif_provider="gcp"
+```
+
+In Snowflake, create a trust policy for the GCP service account email used by your Vault instance.
+
+### Azure (Managed Identity)
+
+```bash
+vault write snowflake-pat/config \
+  account="myorg-myaccount" \
+  username="vault_admin" \
+  wif_provider="azure" \
+  wif_entra_resource="api://my-snowflake-app-id"   # optional, app-specific
+```
+
+In Snowflake, create a trust policy for the Managed Identity object ID or client ID of your Vault instance.
+
+### Kubernetes (OIDC)
+
+```bash
+vault write snowflake-pat/config \
+  account="myorg-myaccount" \
+  username="vault_admin" \
+  wif_provider="oidc"
+```
+
+In Snowflake, configure an OIDC trust policy pointing at your Kubernetes OIDC issuer URL.
 
 ---
 

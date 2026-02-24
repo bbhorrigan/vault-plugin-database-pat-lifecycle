@@ -92,7 +92,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, data 
 		}
 	}
 
-	client, err := newSnowflakeClient(cfg.Account, cfg.Username, cfg.PrivateKey)
+	client, err := newSnowflakeClientFromConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Snowflake: %w", err)
 	}

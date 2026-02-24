@@ -22,6 +22,36 @@ type snowflakeClient struct {
 	account string
 }
 
+// newSnowflakeClientFromConfig opens a Snowflake connection using the auth method
+// configured in cfg. Uses WIF when cfg.WIFProvider is set, otherwise uses key-pair auth.
+func newSnowflakeClientFromConfig(cfg *backendConfig) (*snowflakeClient, error) {
+	if cfg.WIFProvider != "" {
+		return newSnowflakeClientWIF(cfg.Account, cfg.Username, cfg.WIFProvider, cfg.WIFEntraResource)
+	}
+	return newSnowflakeClient(cfg.Account, cfg.Username, cfg.PrivateKey)
+}
+
+// newSnowflakeClientWIF opens a Snowflake connection using Workload Identity
+// Federation (WIF). The cloud provider's native identity is used — no private
+// key is needed. wifProvider must be one of: aws, gcp, azure, oidc.
+func newSnowflakeClientWIF(account, username, wifProvider, wifEntraResource string) (*snowflakeClient, error) {
+	dsn := fmt.Sprintf("%s:@%s.snowflakecomputing.com?authenticator=WORKLOAD_IDENTITY", username, account)
+	cfg, err := gosnowflake.ParseDSN(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse DSN: %w", err)
+	}
+
+	cfg.WorkloadIdentityProvider = strings.ToUpper(wifProvider)
+	if wifEntraResource != "" {
+		cfg.WorkloadIdentityEntraResource = wifEntraResource
+	}
+
+	connector := gosnowflake.NewConnector(gosnowflake.SnowflakeDriver{}, *cfg)
+	db := sql.OpenDB(connector)
+
+	return &snowflakeClient{db: db, account: account}, nil
+}
+
 // newSnowflakeClient opens a Snowflake connection using key-pair (JWT) auth.
 // account should be the bare account identifier (e.g. "sfseeurope-sfcto_jberkowsky").
 // username is the Snowflake user to connect as.

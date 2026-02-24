@@ -25,8 +25,13 @@ revokes Snowflake Programmatic Access Tokens (PATs).
 
 ## Key design decisions
 
-- The plugin uses key-pair (JWT) authentication to connect to Snowflake — no
-  passwords.
+- The plugin supports two admin auth methods: key-pair (JWT) via `private_key`,
+  or Workload Identity Federation (WIF) via `wif_provider`. They are mutually
+  exclusive — set exactly one in the config.
+- WIF uses `gosnowflake.AuthTypeWorkloadIdentityFederation` with
+  `WorkloadIdentityProvider` set to the uppercased provider string (AWS/GCP/AZURE/OIDC).
+  gosnowflake fetches attestation tokens from the cloud metadata service at
+  connection time — no key material stored in Vault.
 - Per-user mode derives the Snowflake username from the caller's Vault entity
   alias (set by OIDC login). Shared mode uses a fixed `snowflake_user` on the
   role.

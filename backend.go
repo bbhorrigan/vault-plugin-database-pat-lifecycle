@@ -86,7 +86,7 @@ func (b *backend) getClient(ctx context.Context, s logical.Storage) (*snowflakeC
 		return nil, logical.CodedError(400, "plugin is not configured")
 	}
 
-	return newSnowflakeClient(cfg.Account, cfg.Username, cfg.PrivateKey)
+	return newSnowflakeClientFromConfig(cfg)
 }
 
 const backendHelp = `

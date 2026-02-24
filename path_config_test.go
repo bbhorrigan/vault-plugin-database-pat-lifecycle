@@ -119,3 +119,77 @@ func TestConfig_MissingRequired(t *testing.T) {
 	require.True(t, resp.IsError())
 	require.Contains(t, resp.Error().Error(), "account")
 }
+
+func TestConfig_WIF(t *testing.T) {
+	b, storage := newTestBackend(t)
+	ctx := context.Background()
+
+	// WIF config — no private_key needed
+	req := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"account":      "myorg-myaccount",
+			"username":     "admin_user",
+			"wif_provider": "aws",
+		},
+	}
+	resp, err := b.HandleRequest(ctx, req)
+	require.NoError(t, err)
+	require.Nil(t, resp)
+
+	// Read back — wif_provider should be present
+	req = &logical.Request{
+		Operation: logical.ReadOperation,
+		Path:      "config",
+		Storage:   storage,
+	}
+	resp, err = b.HandleRequest(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "aws", resp.Data["wif_provider"])
+	require.NotContains(t, resp.Data, "private_key")
+}
+
+func TestConfig_WIF_MutuallyExclusive(t *testing.T) {
+	b, storage := newTestBackend(t)
+	ctx := context.Background()
+
+	// Setting both private_key and wif_provider should be rejected
+	req := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"account":      "myorg-myaccount",
+			"username":     "admin_user",
+			"private_key":  generateTestPrivateKeyPEM(t),
+			"wif_provider": "aws",
+		},
+	}
+	resp, err := b.HandleRequest(ctx, req)
+	require.NoError(t, err)
+	require.True(t, resp.IsError())
+	require.Contains(t, resp.Error().Error(), "mutually exclusive")
+}
+
+func TestConfig_WIF_NeitherKeyNorProvider(t *testing.T) {
+	b, storage := newTestBackend(t)
+	ctx := context.Background()
+
+	// Neither private_key nor wif_provider — should fail
+	req := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"account":  "myorg-myaccount",
+			"username": "admin_user",
+		},
+	}
+	resp, err := b.HandleRequest(ctx, req)
+	require.NoError(t, err)
+	require.True(t, resp.IsError())
+	require.Contains(t, resp.Error().Error(), "private_key or wif_provider")
+}
